@@ -113,6 +113,53 @@ class TestWikiJSConfig:
         assert config.debug is False
 
     @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("false", False),
+            ("FALSE", False),
+            ("False", False),
+            ("0", False),
+            ("no", False),
+            ("NO", False),
+            ("true", True),
+            ("True", True),
+            ("1", True),
+            ("yes", True),
+            ("", True),  # unset-like -> default True
+        ],
+    )
+    def test_templates_enabled_from_env(self, value, expected):
+        """WIKIJS_TEMPLATES_ENABLED parses truthy/falsy strings, defaults True."""
+        env_vars = {
+            "WIKIJS_URL": "https://test.com",
+            "WIKIJS_API_KEY": "test-key",
+            "WIKIJS_TEMPLATES_ENABLED": value,
+        }
+        with patch.dict(os.environ, env_vars):
+            config = WikiJSConfig.load_config()
+        # empty string means env-var set to empty; treat as truthy-default
+        assert config.templates_enabled is expected
+
+    def test_templates_enabled_default_when_unset(self):
+        """If WIKIJS_TEMPLATES_ENABLED is unset, defaults to True."""
+        env_vars = {
+            "WIKIJS_URL": "https://test.com",
+            "WIKIJS_API_KEY": "test-key",
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            os.environ.pop("WIKIJS_TEMPLATES_ENABLED", None)
+            config = WikiJSConfig.load_config()
+        assert config.templates_enabled is True
+
+    def test_resolved_templates_dir_packaged(self):
+        config = WikiJSConfig()
+        assert config.resolved_templates_dir.name == "templates"
+
+    def test_resolved_templates_dir_override(self, tmp_path):
+        config = WikiJSConfig(templates_dir=str(tmp_path))
+        assert config.resolved_templates_dir == tmp_path
+
+    @pytest.mark.parametrize(
         "debug_value,expected",
         [
             ("true", True),

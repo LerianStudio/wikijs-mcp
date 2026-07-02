@@ -59,6 +59,28 @@ You can substitute `pipx run wikijs-mcp` with `uvx wikijs-mcp` or install global
 | `wiki_get_site_info` | Get wiki site metadata (title, description, host) |
 | `wiki_get_history` | Get page edit history with pagination |
 | `wiki_get_version` | Retrieve a specific historical version of a page |
+| `wiki_create_from_template` | Create a page pre-filled from a category template (auto-detects by path) |
+| `wiki_list_templates` | List available category templates |
+| `wiki_show_template` | Show raw content of a category template (dry-run) |
+
+## Category Templates
+
+Docs created via `wiki_create_from_template` are pre-filled with a category-specific
+structure (Risk, ADR, Runbook, Postmortem, Architecture, Technical). Auto-detection
+picks the right template from the page path (e.g. `security/security-home/03-riscos-vulnerabilidades/...`
+→ Risk). Unfilled placeholders become visible `[TODO: preencher]` markers.
+
+Optional overrides:
+- Publish `_templates/<name>` in the wiki to override the packaged default without
+  a redeploy (short timeout, silent fallback on failure).
+- `WIKIJS_TEMPLATES_DIR=/abs/path` overrides the on-disk template dir.
+
+### Disable / rollback
+
+Feature is gated by `WIKIJS_TEMPLATES_ENABLED` (default `true`). Set to `false`
+(also accepts `0`, `no`, case-insensitive) to unregister the 3 template tools
+entirely — everything else keeps working. See [ROLLBACK.md](./ROLLBACK.md) for
+full rollback procedure (env flag, SHA repin, git revert).
 
 ## Development
 

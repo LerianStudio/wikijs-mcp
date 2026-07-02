@@ -42,7 +42,8 @@ class TestWikiJSMCPServer:
         server = WikiJSMCPServer()
 
         tools = await server.app.list_tools()
-        assert len(tools) == 12  # 12 wiki tools
+        # 12 base tools + 3 template tools (templates enabled by default)
+        assert len(tools) == 15
 
         tool_names = [tool.name for tool in tools]
         expected_names = [
@@ -58,8 +59,52 @@ class TestWikiJSMCPServer:
             "wiki_get_site_info",
             "wiki_get_history",
             "wiki_get_version",
+            "wiki_create_from_template",
+            "wiki_list_templates",
+            "wiki_show_template",
         ]
         assert set(tool_names) == set(expected_names)
+
+    @patch("wikijs_mcp.server.WikiJSConfig.load_config")
+    async def test_list_tools_templates_disabled(self, mock_load_config, mock_wiki_config):
+        """When WIKIJS_TEMPLATES_ENABLED=false, template tools are not registered."""
+        mock_wiki_config.templates_enabled = False
+        mock_load_config.return_value = mock_wiki_config
+        server = WikiJSMCPServer()
+
+        tools = await server.app.list_tools()
+        tool_names = {tool.name for tool in tools}
+        assert len(tools) == 12
+        assert "wiki_create_from_template" not in tool_names
+        assert "wiki_list_templates" not in tool_names
+        assert "wiki_show_template" not in tool_names
+
+    @patch("wikijs_mcp.server.WikiJSConfig.load_config")
+    async def test_wiki_show_template_rejects_auto(
+        self, mock_load_config, mock_wiki_config
+    ):
+        """wiki_show_template('auto') must fail loudly, not silently fall back."""
+        mock_load_config.return_value = mock_wiki_config
+        server = WikiJSMCPServer()
+
+        result = await server.app.call_tool("wiki_show_template", {"name": "auto"})
+        text = get_tool_response_text(result)
+        assert "requires a concrete template name" in text
+        assert "auto" in text
+
+    @patch("wikijs_mcp.server.WikiJSConfig.load_config")
+    @patch("wikijs_mcp.server.WikiJSClient")
+    async def test_wiki_show_template_default_skips_wiki(
+        self, mock_client_class, mock_load_config, mock_wiki_config
+    ):
+        """Without check_override, wiki_show_template must not open a WikiJSClient."""
+        mock_load_config.return_value = mock_wiki_config
+        server = WikiJSMCPServer()
+
+        result = await server.app.call_tool("wiki_show_template", {"name": "risk"})
+        text = get_tool_response_text(result)
+        assert "risk (default)" in text
+        mock_client_class.assert_not_called()
 
     @patch("wikijs_mcp.server.WikiJSConfig.load_config")
     @patch("wikijs_mcp.server.WikiJSClient")
