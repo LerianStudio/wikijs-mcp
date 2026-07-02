@@ -7,6 +7,13 @@ from mcp.server import FastMCP
 
 from .client import WikiJSClient
 from .config import WikiJSConfig
+from .templates import (
+    TemplateNotFoundError,
+    apply_variables,
+    get_source_marker,
+    list_templates,
+    resolve,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +44,121 @@ class WikiJSMCPServer:
             ),
         )
         self._setup_tools()
+        if self.config.templates_enabled:
+            self._setup_template_tools()
+
+    def _setup_template_tools(self):
+        """Register category-template tools (gated by WIKIJS_TEMPLATES_ENABLED)."""
+
+        @self.app.tool(
+            description=(
+                "Create a wiki page pre-filled with a category template. "
+                "template='auto' auto-detects from path prefix (risk/adr/runbook/postmortem/"
+                "architecture/technical). Placeholders in the template that are not provided "
+                "in `variables` become '[TODO: preencher]' visible markers."
+            )
+        )
+        async def wiki_create_from_template(
+            path: str,
+            title: str,
+            template: str = "auto",
+            variables: dict | None = None,
+            description: str = "",
+            tags: list[str] | None = None,
+        ) -> str:
+            """Create a new wiki page rendered from a category template."""
+            if tags is None:
+                tags = []
+            variables = dict(variables or {})
+            variables.setdefault("title", title)
+
+            async with WikiJSClient(self.config) as client:
+                try:
+                    resolved_name, raw, from_wiki = await resolve(
+                        template,
+                        path,
+                        client,
+                        self.config.resolved_templates_dir,
+                    )
+                except TemplateNotFoundError as exc:
+                    return f"❌ {exc}"
+
+                rendered = apply_variables(raw, variables)
+                marker = get_source_marker(resolved_name, from_wiki)
+
+                result = await client.create_page(
+                    path=path,
+                    title=title,
+                    content=rendered,
+                    description=description,
+                    tags=tags,
+                )
+
+                page_info = result.get("page", {})
+                response = "✅ Successfully created page from template:\n\n"
+                response += f"**Template:** {marker}\n"
+                response += f"**Title:** {page_info.get('title', title)}\n"
+                response += f"**Path:** {page_info.get('path', path)}\n"
+                response += f"**ID:** {page_info.get('id', 'Unknown')}\n"
+                return response
+
+        @self.app.tool(
+            description=(
+                "List category templates available to wiki_create_from_template. "
+                "Returns name, title and short description for each."
+            )
+        )
+        async def wiki_list_templates() -> str:
+            """List available category templates."""
+            entries = list_templates(self.config.resolved_templates_dir)
+            if not entries:
+                return "No templates available."
+            response = f"Found {len(entries)} template(s):\n\n"
+            for item in entries:
+                response += f"**{item['name']}** — {item['title']}\n"
+                if item.get("description"):
+                    response += f"{item['description']}\n"
+                response += "\n"
+            return response
+
+        @self.app.tool(
+            description=(
+                "Show the raw content of a category template (dry-run). "
+                "Useful before calling wiki_create_from_template. Reads from the local "
+                "package by default; set check_override=True to also probe the wiki "
+                "for a `_templates/<name>` override (slower, hits the network)."
+            )
+        )
+        async def wiki_show_template(name: str, check_override: bool = False) -> str:
+            """Return the raw content of a template by name."""
+            if name == "auto":
+                return (
+                    "❌ wiki_show_template requires a concrete template name — "
+                    "'auto' only works when there's a path context "
+                    "(use wiki_create_from_template for that). "
+                    "Call wiki_list_templates() to see available templates."
+                )
+            templates_dir = self.config.resolved_templates_dir
+            try:
+                if check_override:
+                    async with WikiJSClient(self.config) as client:
+                        resolved_name, raw, from_wiki = await resolve(
+                            name,
+                            path="",
+                            client=client,
+                            templates_dir=templates_dir,
+                        )
+                else:
+                    resolved_name, raw, from_wiki = await resolve(
+                        name,
+                        path="",
+                        client=None,
+                        templates_dir=templates_dir,
+                    )
+            except TemplateNotFoundError as exc:
+                return f"❌ {exc}"
+            marker = get_source_marker(resolved_name, from_wiki)
+            return f"# Template: {marker}\n\n---\n\n{raw}"
 
     def _setup_tools(self):
         """Setup MCP tools."""
